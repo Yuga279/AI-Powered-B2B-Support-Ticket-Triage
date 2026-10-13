@@ -9,3 +9,8 @@ node_modules/
 **/node_modules/
 frontend/dist/
 .vercel/
+
+# Coding-agent skill files installed by the Vercel CLI (not part of the app)
+.agents/
+.claude/
+skills-lock.json
