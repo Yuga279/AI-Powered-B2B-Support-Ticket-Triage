@@ -19,13 +19,14 @@ export function riskSnapshot(result, policyDecision) {
 
 /**
  * Records an escalation event for each triggered rule. No external notification (PagerDuty, Slack, email) is sent.
- * Must be called inside the caller's transaction.
+ * Pass the escalation repository bound to the caller's transaction.
  */
-export function createEscalationService({ escalationRepo, logger }) {
+export function createEscalationService({ logger }) {
   return {
-    recordForDecision({ ticketId, runId, result, resultId, policyDecision, at }) {
-      return policyDecision.triggeredRules.map(({ rule, reason }) => {
-        const { escalation, alreadyRecorded } = escalationRepo.record({
+    async recordForDecision(escalationRepo, { ticketId, runId, result, resultId, policyDecision, at }) {
+      const recorded = [];
+      for (const { rule, reason } of policyDecision.triggeredRules) {
+        const { escalation, alreadyRecorded } = await escalationRepo.record({
           escalationId: uuid(),
           ticketId,
           rule,
@@ -40,8 +41,9 @@ export function createEscalationService({ escalationRepo, logger }) {
         if (!alreadyRecorded) {
           logger?.info({ ticketId, rule, escalationId: escalation.escalationId }, 'escalation recorded (no notification sent)');
         }
-        return { ...escalation, alreadyRecorded };
-      });
+        recorded.push({ ...escalation, alreadyRecorded });
+      }
+      return recorded;
     },
   };
 }

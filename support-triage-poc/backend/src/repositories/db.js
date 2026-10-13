@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
 
 const MIGRATIONS = [
   {
@@ -125,12 +124,12 @@ const DROPPED_COLUMNS = [
 ];
 MIGRATIONS.push({
   version: 2,
-  run(db) {
+  async run(db) {
     for (const [table, column] of DROPPED_COLUMNS) {
-      const exists = db.prepare(`SELECT 1 FROM pragma_table_info('${table}') WHERE name = ?`).get(column);
-      if (exists) db.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+      const exists = await db.get(`SELECT 1 AS present FROM pragma_table_info('${table}') WHERE name = ?`, [column]);
+      if (exists) await db.run(`ALTER TABLE ${table} DROP COLUMN ${column}`);
     }
-    db.exec("UPDATE escalations SET status = 'recorded' WHERE status = 'simulated_sent'");
+    await db.run("UPDATE escalations SET status = 'recorded' WHERE status = 'simulated_sent'");
   },
 });
 
@@ -143,26 +142,121 @@ MIGRATIONS.push({
   `,
 });
 
-export function migrate(db) {
-  db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)');
-  const applied = new Set(db.prepare('SELECT version FROM schema_migrations').all().map((r) => r.version));
+const splitStatements = (sql) =>
+  sql
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+export async function migrate(db) {
+  await db.run('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)');
+  const applied = new Set((await db.all('SELECT version FROM schema_migrations')).map((r) => Number(r.version)));
   for (const m of MIGRATIONS) {
     if (applied.has(m.version)) continue;
-    db.transaction(() => {
-      if (m.sql) db.exec(m.sql);
-      if (m.run) m.run(db);
-      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(m.version, new Date().toISOString());
-    })();
+    await db.transaction(async (tx) => {
+      for (const stmt of splitStatements(m.sql || '')) await tx.run(stmt);
+      if (m.run) await m.run(tx);
+      await tx.run('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)', [m.version, new Date().toISOString()]);
+    });
   }
 }
 
-/** Opens (or creates) the SQLite database and applies migrations. Pass ':memory:' for tests. */
-export function openDatabase(dbPath) {
+// ---------------------------------------------------------------------------------------------
+// Driver adapters. Both expose the same async API:
+//   all(sql, params) -> rows, get(sql, params) -> row | undefined, run(sql, params) -> { changes },
+//   transaction(async (tx) => ...) -> result, close()
+// params: an array for `?` placeholders, or an object (keys without prefix) for `@name` placeholders.
+// ---------------------------------------------------------------------------------------------
+
+const toSqlValue = (v) => (v === undefined ? null : typeof v === 'boolean' ? (v ? 1 : 0) : v);
+const normalizeParams = (params) => {
+  if (params == null) return [];
+  if (Array.isArray(params)) return params.map(toSqlValue);
+  return Object.fromEntries(Object.entries(params).map(([k, v]) => [k, toSqlValue(v)]));
+};
+
+/** Local driver: better-sqlite3 (file or ':memory:'). Used for development and tests. */
+async function openBetterSqlite(dbPath) {
+  const { default: Database } = await import('better-sqlite3');
   if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  const db = new Database(dbPath);
-  if (dbPath !== ':memory:') db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  db.pragma('busy_timeout = 5000');
-  migrate(db);
+  const raw = new Database(dbPath);
+  if (dbPath !== ':memory:') raw.pragma('journal_mode = WAL');
+  raw.pragma('foreign_keys = ON');
+  raw.pragma('busy_timeout = 5000');
+
+  const call = (method, sql, params) => {
+    const stmt = raw.prepare(sql);
+    const p = normalizeParams(params);
+    return Array.isArray(p) ? stmt[method](...p) : stmt[method](p);
+  };
+  const api = {
+    driver: 'better-sqlite3',
+    all: async (sql, params) => call('all', sql, params),
+    get: async (sql, params) => call('get', sql, params),
+    run: async (sql, params) => ({ changes: call('run', sql, params).changes }),
+    /**
+     * better-sqlite3 is synchronous, so every await inside `fn` resolves without yielding to other requests;
+     * BEGIN/COMMIT on the single connection is therefore safe.
+     */
+    async transaction(fn) {
+      raw.exec('BEGIN IMMEDIATE');
+      try {
+        const out = await fn(api);
+        raw.exec('COMMIT');
+        return out;
+      } catch (err) {
+        if (raw.inTransaction) raw.exec('ROLLBACK');
+        throw err;
+      }
+    },
+    close: async () => raw.close(),
+  };
+  return api;
+}
+
+/** Hosted driver: Turso / libSQL (also accepts a local `file:` URL, used by the tests). */
+async function openLibsql(url, authToken) {
+  const { createClient } = await import('@libsql/client');
+  const client = createClient({ url, ...(authToken ? { authToken } : {}) });
+  await client.execute('PRAGMA foreign_keys = ON');
+
+  const wrap = (executor) => {
+    const exec = (sql, params) => executor.execute({ sql, args: normalizeParams(params) });
+    return {
+      all: async (sql, params) => (await exec(sql, params)).rows,
+      get: async (sql, params) => (await exec(sql, params)).rows[0],
+      run: async (sql, params) => ({ changes: (await exec(sql, params)).rowsAffected }),
+    };
+  };
+  const api = {
+    driver: 'libsql',
+    ...wrap(client),
+    async transaction(fn) {
+      const tx = await client.transaction('write');
+      try {
+        await tx.execute('PRAGMA foreign_keys = ON');
+        const out = await fn({ ...wrap(tx), transaction: (inner) => inner(wrap(tx)) });
+        await tx.commit();
+        return out;
+      } catch (err) {
+        await tx.rollback().catch(() => {});
+        throw err;
+      } finally {
+        tx.close();
+      }
+    },
+    close: async () => client.close(),
+  };
+  return api;
+}
+
+/**
+ * Opens the database and applies migrations.
+ * - TURSO_DATABASE_URL set (libsql://… or file:…): libSQL / Turso — used on Vercel.
+ * - otherwise: better-sqlite3 at DB_PATH (or ':memory:').
+ */
+export async function openDatabase({ dbPath, tursoUrl, tursoAuthToken } = {}) {
+  const db = tursoUrl ? await openLibsql(tursoUrl, tursoAuthToken) : await openBetterSqlite(dbPath);
+  await migrate(db);
   return db;
 }

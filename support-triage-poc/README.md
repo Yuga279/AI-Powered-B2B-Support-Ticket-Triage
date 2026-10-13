@@ -268,3 +268,45 @@ npm run test
 | `malformed_response` "hit max_tokens" | Raise `OPENROUTER_MAX_TOKENS`. Reasoning models use tokens before they answer |
 | Screenshot "not analyzed" | Set `OPENROUTER_VISION_MODEL`, and/or enable `LUNA_IMAGE_MODE` after the probe confirms it works |
 | Reset all data | Stop the API, then delete `backend\data\triage.db*` and `backend\data\uploads\*` |
+
+## 10. Deploy to Vercel (frontend and backend)
+
+The whole app deploys as **one Vercel project** at one URL:
+
+| Part | How it runs on Vercel |
+|---|---|
+| React UI | Static files built from `frontend/` (`frontend/dist`) |
+| Express API | One serverless function, `api/index.js`. `vercel.json` sends `/api/*`, `/health` and `/api-docs` to it |
+| Database | **Turso** (hosted SQLite, via `@libsql/client`), when `TURSO_DATABASE_URL` is set |
+| Screenshots | A **private Vercel Blob** store, when `BLOB_READ_WRITE_TOKEN` is set |
+
+Locally nothing changes: without those variables the app uses `backend/data/triage.db` (better-sqlite3) and `backend/data/uploads`.
+
+> Without Turso and Blob, the deployment still starts, but data goes to `/tmp` and is lost whenever Vercel recycles the function.
+
+### Steps
+
+1. **Push the code to GitHub.** Vercel deploys from the repository; `.vercelignore` and `.gitignore` keep `.env` and local data out.
+2. **Import the project** in Vercel (Add New → Project → pick the repository).
+   - **Root Directory:** `support-triage-poc` (the git repository root is one level above the app).
+   - Framework preset: **Other**. Build, install and output settings come from `vercel.json`.
+3. **Create the database:** in the project, Storage → Marketplace → **Turso** → create a database and connect it.
+   - This adds `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. If the integration names them differently, add these two names yourself with the same values.
+   - Tables are created automatically on the first request.
+4. **Create the screenshot store:** Storage → **Blob** → create a store with **private** access and connect it. This adds `BLOB_READ_WRITE_TOKEN`.
+5. **Add environment variables** (Settings → Environment Variables), at least:
+
+   | Variable | Value |
+   |---|---|
+   | `OPENROUTER_API_KEY` | your OpenRouter key |
+   | `OPENROUTER_APP_URL` | your Vercel URL, e.g. `https://<project>.vercel.app` |
+   | `OPENROUTER_VISION_MODEL` | optional, a vision model for screenshots |
+
+   Everything else has the same defaults as `backend/.env.example`.
+6. **Deploy**, then open `https://<project>.vercel.app/health`. It should return `"db":"ok"` and `"mode":"live"`.
+
+### Limits on Vercel
+
+- **Screenshots** are limited to 4 MB, because Vercel functions accept request bodies up to 4.5 MB.
+- **Each request** may run for up to 60 seconds (`maxDuration` in `vercel.json`); provider timeouts are 20 s (text) and 45 s (screenshots).
+- **No login:** the deployment is public. Anyone with the URL can create tickets and trigger paid OpenRouter calls. Set a credit limit on the OpenRouter key you use there.

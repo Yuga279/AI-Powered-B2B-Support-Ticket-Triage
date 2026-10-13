@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "nodemon --watch src --ext js,json src/server.js",
@@ -15,6 +15,8 @@
     "probe:decisions": "node src/scripts/probeDecisions.js"
   },
   "dependencies": {
+    "@libsql/client": "^0.18.0",
+    "@vercel/blob": "^2.8.1",
     "better-sqlite3": "^13.0.3",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",

@@ -2,9 +2,10 @@
   "name": "support-triage-poc",
   "version": "0.1.0",
   "private": true,
-  "description": "POC: AI-powered B2B support ticket triage (Jev and GPT-6 Luna Decisions via OpenRouter, mock mode)",
+  "type": "module",
+  "description": "POC: AI-powered B2B support ticket triage (Jev and GPT-6 Luna Decisions via OpenRouter)",
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "scripts": {
     "install:all": "npm install && npm install --prefix backend && npm install --prefix frontend",

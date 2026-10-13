@@ -35,7 +35,13 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   DB_PATH: z.string().default('data/triage.db'),
   UPLOAD_DIR: z.string().default('data/uploads'),
-  MAX_UPLOAD_MB: num(5, z.number().positive().max(20)),
+  // Vercel functions accept request bodies up to 4.5 MB, so uploads default to 4 MB.
+  MAX_UPLOAD_MB: num(4, z.number().positive().max(20)),
+  // Hosted storage (used on Vercel). Without these, the local SQLite file and upload folder are used.
+  TURSO_DATABASE_URL: optStr,
+  TURSO_AUTH_TOKEN: optStr,
+  BLOB_READ_WRITE_TOKEN: optStr,
+  VERCEL: optStr,
   JSON_BODY_LIMIT: z.string().default('1mb'),
 
   TEXT_PROVIDER: z.enum(['jev', 'luna', 'openrouter_llm']).default('jev'),
@@ -86,8 +92,13 @@ export function loadConfig(env = process.env) {
     port: e.PORT,
     logLevel: e.LOG_LEVEL,
     corsOrigin: e.CORS_ORIGIN,
-    dbPath: resolvePath(e.DB_PATH),
-    uploadDir: resolvePath(e.UPLOAD_DIR),
+    // On Vercel the deployment folder is read-only; without Turso/Blob, fall back to /tmp (data is not kept).
+    dbPath: e.VERCEL && !e.TURSO_DATABASE_URL ? '/tmp/triage.db' : resolvePath(e.DB_PATH),
+    uploadDir: e.VERCEL && !e.BLOB_READ_WRITE_TOKEN ? '/tmp/uploads' : resolvePath(e.UPLOAD_DIR),
+    tursoUrl: e.TURSO_DATABASE_URL,
+    tursoAuthToken: e.TURSO_AUTH_TOKEN,
+    blobToken: e.BLOB_READ_WRITE_TOKEN,
+    onVercel: !!e.VERCEL,
     maxUploadBytes: Math.round(e.MAX_UPLOAD_MB * 1024 * 1024),
     jsonBodyLimit: e.JSON_BODY_LIMIT,
     textProvider: e.TEXT_PROVIDER,

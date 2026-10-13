@@ -1,21 +1,14 @@
-import fs from 'node:fs';
 import multer from 'multer';
 import { ALLOWED_IMAGE_TYPES } from '../services/attachmentService.js';
 import { AppError } from '../utils/errors.js';
-import { uuid } from '../utils/ids.js';
 
 /**
- * Accepts a single optional `screenshot` field. Files are written outside any public directory with a
- * random name. Declared MIME type is checked here; magic bytes are checked by attachmentService.
+ * Accepts a single optional `screenshot` field, held in memory (works on serverless hosts) and then stored
+ * by attachmentService. Declared MIME type is checked here; magic bytes are checked before storing.
  */
 export function createUploadMiddleware(config) {
-  fs.mkdirSync(config.uploadDir, { recursive: true });
-  const storage = multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, config.uploadDir),
-    filename: (_req, file, cb) => cb(null, `${uuid()}${ALLOWED_IMAGE_TYPES[file.mimetype]?.ext || '.bin'}`),
-  });
   return multer({
-    storage,
+    storage: multer.memoryStorage(),
     limits: { fileSize: config.maxUploadBytes, files: 1, fields: 20, fieldSize: 100 * 1024 },
     fileFilter: (_req, file, cb) => {
       if (!ALLOWED_IMAGE_TYPES[file.mimetype]) {

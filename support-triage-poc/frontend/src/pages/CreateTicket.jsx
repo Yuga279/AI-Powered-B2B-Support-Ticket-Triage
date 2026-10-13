@@ -13,7 +13,7 @@ const EMPTY = {
   affectedUsers: 1,
   minutesUntilSlaDeadline: 240,
 };
-const MAX_BYTES = 5 * 1024 * 1024;
+const MAX_BYTES = 4 * 1024 * 1024; // matches the backend default (Vercel request limit is 4.5 MB)
 const TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 
 export default function CreateTicket() {
@@ -46,7 +46,7 @@ export default function CreateTicket() {
     setError(null);
     if (f && (!TYPES.includes(f.type) || f.size > MAX_BYTES)) {
       e.target.value = '';
-      setError(new Error('Screenshot must be a PNG, JPEG or WebP image of 5 MB or less.'));
+      setError(new Error('Screenshot must be a PNG, JPEG or WebP image of 4 MB or less.'));
       return;
     }
     setFile(f || null);

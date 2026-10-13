@@ -1,24 +1,19 @@
 import { createTicketSchema } from '../validators/ticketSchemas.js';
 
-export function createTicketsController({ ticketService, attachmentService }) {
+export function createTicketsController({ ticketService }) {
   return {
     async create(req, res) {
-      const parsed = createTicketSchema.safeParse(req.body ?? {});
-      if (!parsed.success) {
-        attachmentService.discard(req.file);
-        throw parsed.error;
-      }
-      const out = await ticketService.createTicket(parsed.data, req.file);
-      res.status(201).json(out);
+      const input = createTicketSchema.parse(req.body ?? {});
+      res.status(201).json(await ticketService.createTicket(input, req.file));
     },
-    list(req, res) {
-      res.json({ tickets: ticketService.list(req.validatedQuery) });
+    async list(req, res) {
+      res.json({ tickets: await ticketService.list(req.validatedQuery) });
     },
-    get(req, res) {
-      res.json(ticketService.getDetail(req.params.ticketId));
+    async get(req, res) {
+      res.json(await ticketService.getDetail(req.params.ticketId));
     },
-    review(req, res) {
-      res.json(ticketService.review(req.params.ticketId, req.body));
+    async review(req, res) {
+      res.json(await ticketService.review(req.params.ticketId, req.body));
     },
   };
 }

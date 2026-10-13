@@ -20,12 +20,28 @@ export function testConfig(env = {}) {
   });
 }
 
-/** Creates an app with an in-memory DB, a fixed clock and an optional stubbed fetch. */
-export function makeTestApp({ env = {}, fetchImpl, clock = fixedClock } = {}) {
+// Which database driver makeTestApp uses: 'better-sqlite3' (in memory) or 'libsql' (the Turso client, on a temp file).
+let testDriver = 'better-sqlite3';
+export const DRIVERS = ['better-sqlite3', 'libsql'];
+export const setTestDriver = (driver) => {
+  testDriver = driver;
+};
+
+/** Creates an app with a fresh DB, a fixed clock and an optional stubbed fetch. */
+export async function makeTestApp({ env = {}, fetchImpl, clock = fixedClock } = {}) {
   const config = testConfig(env);
-  const db = openDatabase(':memory:');
+  const dbOptions =
+    testDriver === 'libsql'
+      ? { tursoUrl: `file:${path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'triage-libsql-')), 'test.db').split(path.sep).join('/')}` }
+      : { dbPath: ':memory:' };
+  const db = await openDatabase(dbOptions);
   const app = createApp({ config, db, fetchImpl, sleep: async () => {}, clock });
-  return { app, db, config, services: app.locals.services };
+  // Simple synchronous-looking helpers for assertions in tests.
+  const q = {
+    count: async (sql, params) => Number((await db.get(sql, params)).n),
+    get: (sql, params) => db.get(sql, params),
+  };
+  return { app, db, q, config, services: app.locals.services };
 }
 
 /** Builds a Response-like object for stubbed fetch. */

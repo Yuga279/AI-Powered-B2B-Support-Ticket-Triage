@@ -60,13 +60,13 @@ function mapRunRow(r) {
 }
 
 export function createTriageRepo(db) {
-  const insertRun = db.prepare(`
+  const INSERT_RUN = `
     INSERT INTO triage_runs (run_id, ticket_id, mode, requested_providers, status, created_at)
-    VALUES (@runId, @ticketId, @mode, @requestedProviders, 'running', @createdAt)`);
-  const completeRun = db.prepare(`
+    VALUES (@runId, @ticketId, @mode, @requestedProviders, 'running', @createdAt)`;
+  const COMPLETE_RUN = `
     UPDATE triage_runs SET status = @status, routing_trace = @routingTrace, policy_decision = @policyDecision,
-      completed_at = @completedAt WHERE run_id = @runId`);
-  const insertResult = db.prepare(`
+      completed_at = @completedAt WHERE run_id = @runId`;
+  const INSERT_RESULT = `
     INSERT INTO provider_results (result_id, run_id, ticket_id, role, provider, transport, model, upstream_provider,
       status, team, severity, raw_severity, risk_level, risk_summary, breach_probability, risk_output_type,
       calibration_status, predicate_score, predicate_verdict, confidence, explanation, human_review_required,
@@ -76,14 +76,14 @@ export function createTriageRepo(db) {
       @status, @team, @severity, @rawSeverity, @riskLevel, @riskSummary, @breachProbability, @riskOutputType,
       @calibrationStatus, @predicateScore, @predicateVerdict, @confidence, @explanation, @humanReviewRequired,
       @reviewReasons, @policyDecision, @errorCode, @errorMessage, @errorRetryable, @durationMs, @costUsd,
-      @requestPayload, @responsePayload, @decidedAt, @createdAt)`);
+      @requestPayload, @responsePayload, @decidedAt, @createdAt)`;
 
   return {
-    createRun({ runId, ticketId, mode, requestedProviders, createdAt }) {
-      insertRun.run({ runId, ticketId, mode, requestedProviders: json(requestedProviders || []), createdAt });
+    async createRun({ runId, ticketId, mode, requestedProviders, createdAt }) {
+      await db.run(INSERT_RUN, { runId, ticketId, mode, requestedProviders: json(requestedProviders || []), createdAt });
     },
-    completeRun({ runId, status, routingTrace, policyDecision, completedAt }) {
-      completeRun.run({
+    async completeRun({ runId, status, routingTrace, policyDecision, completedAt }) {
+      await db.run(COMPLETE_RUN, {
         runId,
         status,
         routingTrace: json(routingTrace || []),
@@ -91,8 +91,8 @@ export function createTriageRepo(db) {
         completedAt,
       });
     },
-    insertResult(r) {
-      insertResult.run({
+    async insertResult(r) {
+      await db.run(INSERT_RESULT, {
         resultId: r.resultId,
         runId: r.runId,
         ticketId: r.ticketId,
@@ -128,25 +128,19 @@ export function createTriageRepo(db) {
         createdAt: r.createdAt,
       });
     },
-    getRun(runId) {
-      const r = db.prepare('SELECT * FROM triage_runs WHERE run_id = ?').get(runId);
+    async getRun(runId) {
+      const r = await db.get('SELECT * FROM triage_runs WHERE run_id = ?', [runId]);
       return r ? mapRunRow(r) : null;
     },
-    listRunsForTicket(ticketId) {
-      const runs = db
-        .prepare('SELECT * FROM triage_runs WHERE ticket_id = ? ORDER BY created_at DESC, rowid DESC')
-        .all(ticketId)
-        .map(mapRunRow);
-      const results = db
-        .prepare('SELECT * FROM provider_results WHERE ticket_id = ? ORDER BY created_at, rowid')
-        .all(ticketId)
-        .map(mapResultRow);
+    async listRunsForTicket(ticketId) {
+      const runs = (await db.all('SELECT * FROM triage_runs WHERE ticket_id = ? ORDER BY created_at DESC, rowid DESC', [ticketId])).map(mapRunRow);
+      const results = (await db.all('SELECT * FROM provider_results WHERE ticket_id = ? ORDER BY created_at, rowid', [ticketId])).map(mapResultRow);
       const byRun = new Map(runs.map((r) => [r.runId, { ...r, results: [] }]));
       for (const res of results) byRun.get(res.runId)?.results.push(res);
       return [...byRun.values()];
     },
-    resultsForRun(runId) {
-      return db.prepare('SELECT * FROM provider_results WHERE run_id = ? ORDER BY rowid').all(runId).map(mapResultRow);
+    async resultsForRun(runId) {
+      return (await db.all('SELECT * FROM provider_results WHERE run_id = ? ORDER BY rowid', [runId])).map(mapResultRow);
     },
   };
 }

@@ -1,0 +1,11 @@
+# Never upload local secrets or local data to Vercel; set environment variables in the Vercel project instead.
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
+backend/data/
+node_modules/
+**/node_modules/
+frontend/dist/
+.vercel/

@@ -6,6 +6,7 @@ import { planAutoRoute } from './routingService.js';
 import { notFound } from '../utils/errors.js';
 import { uuid } from '../utils/ids.js';
 import { toExchange } from '../utils/exchange.js';
+import { createRepos } from '../repositories/index.js';
 
 const NONE_PROVIDER = { id: 'none', label: 'No provider', transport: null };
 
@@ -70,46 +71,47 @@ export function createTriageService({ db, repos, registry, attachmentService, es
     return provider.isConfigured() ? executeProvider(provider, ticket, images) : Promise.resolve(unavailableResult(provider, ticket));
   }
 
-  function loadContext(ticketId) {
+  async function loadContext(ticketId) {
     const now = clock();
-    const ticket = repos.tickets.get(ticketId, now);
+    const ticket = await repos.tickets.get(ticketId, now);
     if (!ticket) throw notFound(`Ticket ${ticketId}`);
-    const images = ticket.hasImage ? attachmentService.loadImages(repos.tickets.getAttachmentRows(ticketId)) : [];
+    const images = ticket.hasImage ? await attachmentService.loadImages(await repos.tickets.getAttachmentRows(ticketId)) : [];
     return { ticket, images };
   }
 
   /** Persists a run with all its results and escalations in one transaction. */
-  function persistRun({ ticket, runId, routingTrace, entries }) {
+  async function persistRun({ ticket, runId, routingTrace, entries }) {
     const at = clock().toISOString();
     const escalations = [];
-    db.transaction(() => {
+    await db.transaction(async (tx) => {
+      const txRepos = createRepos(tx);
       for (const e of entries) {
         e.result.resultId = uuid();
-        repos.triage.insertResult({ ...e.result, runId, role: e.role, policyDecision: e.policyDecision, createdAt: at });
+        await txRepos.triage.insertResult({ ...e.result, runId, role: e.role, policyDecision: e.policyDecision, createdAt: at });
         if (e.policyDecision) {
           escalations.push(
-            ...escalationService.recordForDecision({
+            ...(await escalationService.recordForDecision(txRepos.escalations, {
               ticketId: ticket.ticketId,
               runId,
               result: e.result.provider === 'none' ? null : e.result,
               resultId: e.result.resultId,
               policyDecision: e.policyDecision,
               at,
-            }),
+            })),
           );
         }
       }
       const decisions = entries.filter((e) => e.policyDecision).map((e) => e.policyDecision);
       const runStatus = entries.some((e) => e.policyDecision && e.result.status === 'ok') ? 'completed' : 'failed';
-      repos.triage.completeRun({
+      await txRepos.triage.completeRun({
         runId,
         status: runStatus,
         routingTrace,
         policyDecision: decisions.length === 1 ? decisions[0] : decisions,
         completedAt: at,
       });
-      repos.tickets.setStatus(ticket.ticketId, ticketStatusFor(decisions), at);
-    })();
+      await txRepos.tickets.setStatus(ticket.ticketId, ticketStatusFor(decisions), at);
+    });
     return escalations;
   }
 
@@ -135,7 +137,7 @@ export function createTriageService({ db, repos, registry, attachmentService, es
      * Manual mode (provider given) runs exactly that provider.
      */
     async triageTicket(ticketId, { provider: providerId } = {}) {
-      const { ticket, images } = loadContext(ticketId);
+      const { ticket, images } = await loadContext(ticketId);
       const runId = uuid();
       const mode = providerId ? 'manual' : 'auto';
 
@@ -148,7 +150,7 @@ export function createTriageService({ db, repos, registry, attachmentService, es
         notes = plan.notes;
         chain = plan.chain;
       }
-      repos.triage.createRun({ runId, ticketId, mode, requestedProviders: chain, createdAt: clock().toISOString() });
+      await repos.triage.createRun({ runId, ticketId, mode, requestedProviders: chain, createdAt: clock().toISOString() });
 
       const attempts = [];
       for (const id of chain) {
@@ -183,11 +185,11 @@ export function createTriageService({ db, repos, registry, attachmentService, es
       entries.push({ result: primary, role: 'primary', policyDecision });
 
       const routingTrace = { notes, attempts: attempts.map(traceOf) };
-      const escalations = persistRun({ ticket, runId, routingTrace, entries });
+      const escalations = await persistRun({ ticket, runId, routingTrace, entries });
 
       return {
-        ticket: repos.tickets.get(ticketId, clock()),
-        run: repos.triage.getRun(runId),
+        ticket: await repos.tickets.get(ticketId, clock()),
+        run: await repos.triage.getRun(runId),
         result: { ...primary, policyDecision },
         attempts: attempts.map(traceOf),
         escalations,
@@ -196,9 +198,9 @@ export function createTriageService({ db, repos, registry, attachmentService, es
 
     /** Sends the same ticket to each selected provider independently; partial failures are kept. */
     async compareProviders({ ticketId, providers }) {
-      const { ticket, images } = loadContext(ticketId);
+      const { ticket, images } = await loadContext(ticketId);
       const runId = uuid();
-      repos.triage.createRun({ runId, ticketId, mode: 'compare', requestedProviders: providers, createdAt: clock().toISOString() });
+      await repos.triage.createRun({ runId, ticketId, mode: 'compare', requestedProviders: providers, createdAt: clock().toISOString() });
 
       const settled = await Promise.allSettled(providers.map((id) => runOrUnavailable(id, ticket, images)));
       const results = settled.map((s, i) =>
@@ -213,7 +215,7 @@ export function createTriageService({ db, repos, registry, attachmentService, es
             }),
       );
       const entries = results.map((r) => ({ result: r, role: 'comparison', policyDecision: decide(ticket, r) }));
-      const escalations = persistRun({
+      const escalations = await persistRun({
         ticket,
         runId,
         routingTrace: { notes: [], attempts: results.map(traceOf) },
@@ -222,8 +224,8 @@ export function createTriageService({ db, repos, registry, attachmentService, es
 
       const ok = results.filter((r) => r.status === 'ok');
       return {
-        ticket: repos.tickets.get(ticketId, clock()),
-        run: repos.triage.getRun(runId),
+        ticket: await repos.tickets.get(ticketId, clock()),
+        run: await repos.triage.getRun(runId),
         results: entries.map((e) => ({ ...e.result, policyDecision: e.policyDecision })),
         escalations,
         summary: {
