@@ -6,12 +6,14 @@ import Tickets from './pages/Tickets.jsx';
 import CreateTicket from './pages/CreateTicket.jsx';
 import TicketDetail from './pages/TicketDetail.jsx';
 import Compare from './pages/Compare.jsx';
+import HowItWorks from './pages/HowItWorks.jsx';
 
 const NAV = [
   ['/', 'Dashboard'],
   ['/tickets/new', 'New ticket'],
   ['/tickets', 'Tickets'],
   ['/compare', 'Compare'],
+  ['/how-it-works', 'How it works'],
 ];
 
 function ModeNote() {
@@ -59,6 +61,7 @@ export default function App() {
           <Route path="/tickets/new" element={<CreateTicket />} />
           <Route path="/tickets/:ticketId" element={<TicketDetail />} />
           <Route path="/compare" element={<Compare />} />
+          <Route path="/how-it-works" element={<HowItWorks />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

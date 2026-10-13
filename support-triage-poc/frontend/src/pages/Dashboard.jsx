@@ -12,8 +12,16 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-900">Dashboard</h1>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-slate-900">Dashboard</h1>
+          <p className="mt-0.5 text-sm text-slate-600">
+            AI decision models route each support ticket and rate its severity and SLA risk; simple rules decide what to escalate.{' '}
+            <Link className="text-indigo-600 hover:underline" to="/how-it-works">
+              How it works →
+            </Link>
+          </p>
+        </div>
         <Link className="btn-primary" to="/tickets/new">
           New ticket
         </Link>
