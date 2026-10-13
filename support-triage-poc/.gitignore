@@ -22,3 +22,8 @@ Thumbs.db
 .vercel/
 .env*
 !.env.example
+
+# Coding-agent skill files installed by the Vercel CLI (not part of the app)
+.agents/
+.claude/
+skills-lock.json
