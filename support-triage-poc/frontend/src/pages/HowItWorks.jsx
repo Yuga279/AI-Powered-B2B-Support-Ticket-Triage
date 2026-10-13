@@ -51,6 +51,7 @@ export default function HowItWorks() {
   const { data } = useApi(() => api.providers(), []);
   const policy = data?.policy;
   const configured = Object.fromEntries((data?.providers || []).map((p) => [p.id, p.configured]));
+  const lunaReadsImages = (data?.providers || []).find((p) => p.id === 'luna')?.supportsImages;
   const v = (value, fallback) => (value ?? fallback);
 
   return (
@@ -83,7 +84,8 @@ export default function HowItWorks() {
             are removed before anything is sent to a model.
           </Step>
           <Step n={3} title="It is routed to a model">
-            Text-only tickets go to <strong>Jev</strong>. Tickets with a screenshot go to a model that can read images. If a model fails, the next one is tried.
+            Text-only tickets go to <strong>Jev</strong>. Tickets with a screenshot go to a model that can read images
+            {lunaReadsImages ? <> (<strong>Luna</strong>, which receives the screenshot itself)</> : null}. If a model fails, the next one is tried.
             All calls go through <strong>OpenRouter</strong> from the server; the API key never reaches your browser.
           </Step>
           <Step n={4} title="The model answers four questions">
@@ -128,7 +130,11 @@ export default function HowItWorks() {
           <ProviderCard
             name="Luna Decisions"
             by="OpenAI GPT-6 Luna, via OpenRouter"
-            input="Text (image input through OpenRouter is not yet confirmed)."
+            input={
+              lunaReadsImages
+                ? 'Text and screenshots. The default for tickets with a screenshot.'
+                : 'Text. Screenshots only when image input is switched on (LUNA_IMAGE_MODE).'
+            }
             risk="A yes/no verdict (OpenAI calls it a predicate). Treated as a flag, not a percentage."
             configured={configured.luna}
           />

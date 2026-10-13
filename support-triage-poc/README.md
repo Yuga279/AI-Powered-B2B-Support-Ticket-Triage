@@ -12,7 +12,7 @@ All real AI calls go through **OpenRouter** using a single backend key:
 | Provider id | What it is | OpenRouter transport | Default model | Images | Risk output semantics |
 |---|---|---|---|---|---|
 | `jev` | TypeSafe **Jev** decision model | Decisions endpoint (`POST /api/alpha/decisions`) | `typesafe/jev-1.13` | No (text only) | **probability**: the `noul` value, with calibration `vendor_claimed` |
-| `luna` | OpenAI **GPT-6 Luna Decisions** ("served through OpenAI's Decisions API") | Decisions endpoint | `openai/gpt-6-luna-decisions` | Only if `LUNA_IMAGE_MODE` is enabled after probing | **predicate**: a score plus a yes/no verdict. *Never* treated as a probability |
+| `luna` | OpenAI **GPT-6 Luna Decisions** ("served through OpenAI's Decisions API") | Decisions endpoint | `openai/gpt-6-luna-decisions` | Yes with `LUNA_IMAGE_MODE=state_parts` (verified 2026-10-13) | **predicate**: a score plus a yes/no verdict. *Never* treated as a probability |
 | `openrouter_llm` | Any general chat/vision LLM you choose | Chat completions (`POST /api/v1/chat/completions`) | none: you set `OPENROUTER_MODEL` / `OPENROUTER_VISION_MODEL` | Yes, with a vision model | **qualitative**: low/medium/high, no probability |
 
 > `openrouter_llm` is an ordinary LLM call through OpenRouter. It is **not** the OpenAI Decisions API. The Luna Decisions model goes through OpenRouter's dedicated Decisions endpoint.
